@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const registry = @import("registry.zig");
 const io_util = @import("io_util.zig");
 const timefmt = @import("timefmt.zig");
+const version = @import("version.zig");
 const c = @cImport({
     @cInclude("time.h");
 });
@@ -32,12 +33,18 @@ pub const Command = union(enum) {
     import_auth: ImportOptions,
     switch_account: SwitchOptions,
     remove_account: RemoveOptions,
+    version: void,
     help: void,
 };
 
 pub fn parseArgs(allocator: std.mem.Allocator, args: []const [:0]const u8) !Command {
     if (args.len < 2) return Command{ .help = {} };
     const cmd = std.mem.sliceTo(args[1], 0);
+
+    if (std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-V")) {
+        if (args.len > 2) return Command{ .help = {} };
+        return Command{ .version = {} };
+    }
 
     if (std.mem.eql(u8, cmd, "list")) {
         if (args.len > 2) return Command{ .help = {} };
@@ -129,14 +136,23 @@ pub fn printHelp() !void {
     stdout.init();
     const out = stdout.out();
     try out.writeAll(
-        "codex-auth (local-only)\n\n" ++
+        "codex-auth " ++ version.app_version ++ "\n\n" ++
         "Commands:\n" ++
+        "  --version, -V\n" ++
         "  list\n" ++
         "  add [--no-login]\n" ++
         "  import <path> [--name <name>]\n" ++
         "  switch [<email-prefix-or-part>]\n" ++
         "  remove\n"
     );
+    try out.flush();
+}
+
+pub fn printVersion() !void {
+    var stdout: io_util.Stdout = undefined;
+    stdout.init();
+    const out = stdout.out();
+    try out.print("codex-auth {s}\n", .{version.app_version});
     try out.flush();
 }
 

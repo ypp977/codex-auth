@@ -25,6 +25,7 @@ pub fn main() !void {
         .import_auth => |opts| try handleImport(allocator, codex_home, opts),
         .switch_account => |opts| try handleSwitch(allocator, codex_home, opts),
         .remove_account => |_| try handleRemove(allocator, codex_home),
+        .version => try cli.printVersion(),
         .help => try cli.printHelp(),
     }
 }
