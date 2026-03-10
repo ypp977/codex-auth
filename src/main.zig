@@ -21,7 +21,7 @@ pub fn main() !void {
 
     switch (cmd) {
         .list => |opts| try handleList(allocator, codex_home, opts),
-        .add => |opts| try handleAdd(allocator, codex_home, opts),
+        .login => |opts| try handleLogin(allocator, codex_home, opts),
         .import_auth => |opts| try handleImport(allocator, codex_home, opts),
         .switch_account => |opts| try handleSwitch(allocator, codex_home, opts),
         .remove_account => |_| try handleRemove(allocator, codex_home),
@@ -54,8 +54,9 @@ fn handleList(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.Li
     try format.printAccounts(allocator, &reg, .table);
 }
 
-fn handleAdd(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.AddOptions) !void {
-    if (opts.login) {
+fn handleLogin(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.LoginOptions) !void {
+    cli.warnDeprecatedLoginAlias(opts);
+    if (opts.launch_codex_login) {
         try cli.runCodexLogin(allocator);
     }
     const auth_path = try registry.activeAuthPath(allocator, codex_home);

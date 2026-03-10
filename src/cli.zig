@@ -11,6 +11,8 @@ const c = @cImport({
 const ansi = struct {
     const reset = "\x1b[0m";
     const dim = "\x1b[2m";
+    const red = "\x1b[31m";
+    const bold_red = "\x1b[1;31m";
     const green = "\x1b[32m";
     const bold_green = "\x1b[1;32m";
     const bold = "\x1b[1m";
@@ -20,17 +22,25 @@ fn colorEnabled() bool {
     return std.fs.File.stdout().isTty();
 }
 
+fn stderrColorEnabled() bool {
+    return std.fs.File.stderr().isTty();
+}
+
 pub const OutputFormat = enum { table, json, csv, compact };
 
 pub const ListOptions = struct {};
-pub const AddOptions = struct { login: bool };
+pub const LoginInvocation = enum { login, add_alias };
+pub const LoginOptions = struct {
+    launch_codex_login: bool,
+    invocation: LoginInvocation,
+};
 pub const ImportOptions = struct { auth_path: []u8, alias: ?[]u8 };
 pub const SwitchOptions = struct { email: ?[]u8 };
 pub const RemoveOptions = struct {};
 
 pub const Command = union(enum) {
     list: ListOptions,
-    add: AddOptions,
+    login: LoginOptions,
     import_auth: ImportOptions,
     switch_account: SwitchOptions,
     remove_account: RemoveOptions,
@@ -52,18 +62,22 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const [:0]const u8) !Comm
         return Command{ .list = .{} };
     }
 
-    if (std.mem.eql(u8, cmd, "add")) {
-        var login = true;
+    if (std.mem.eql(u8, cmd, "login") or std.mem.eql(u8, cmd, "add")) {
+        const invocation: LoginInvocation = if (std.mem.eql(u8, cmd, "add")) .add_alias else .login;
+        var launch_codex_login = true;
         var i: usize = 2;
         while (i < args.len) : (i += 1) {
             const arg = std.mem.sliceTo(args[i], 0);
-            if (std.mem.eql(u8, arg, "--no-login")) {
-                login = false;
+            if (std.mem.eql(u8, arg, "--skip")) {
+                launch_codex_login = false;
             } else {
                 return Command{ .help = {} };
             }
         }
-        return Command{ .add = .{ .login = login } };
+        return Command{ .login = .{
+            .launch_codex_login = launch_codex_login,
+            .invocation = invocation,
+        } };
     }
 
     if (std.mem.eql(u8, cmd, "import")) {
@@ -137,7 +151,11 @@ pub fn printHelp() !void {
     stdout.init();
     const out = stdout.out();
     const use_color = colorEnabled();
+    try writeHelp(out, use_color);
+    try out.flush();
+}
 
+pub fn writeHelp(out: *std.Io.Writer, use_color: bool) !void {
     if (use_color) try out.writeAll(ansi.bold);
     try out.writeAll("codex-auth");
     if (use_color) try out.writeAll(ansi.reset);
@@ -154,14 +172,21 @@ pub fn printHelp() !void {
 
     try writeHelpCommand(out, use_color, "--version, -V", "Show version");
     try writeHelpCommand(out, use_color, "list", "List available accounts");
-    try writeHelpCommand(out, use_color, "add [--no-login]", "Add the current account");
+    try writeHelpCommand(out, use_color, "login [--skip]", "Login and add the current account");
     try writeHelpCommand(out, use_color, "import <path> [--alias <alias>]", "Import one auth file or a directory");
     try writeHelpCommand(out, use_color, "switch [<email-prefix-or-part>]", "Switch the active account");
     try writeHelpCommand(out, use_color, "remove", "Remove one or more accounts");
-    try out.flush();
+
+    try out.writeAll("\n");
+    if (use_color) try out.writeAll(ansi.bold);
+    try out.writeAll("Notes:");
+    if (use_color) try out.writeAll(ansi.reset);
+    try out.writeAll("\n\n");
+    try out.writeAll("  `add` is accepted as a deprecated alias for `login`.\n");
+    try out.writeAll("  Use `--skip` to read the current auth without running `codex login`.\n");
 }
 
-fn writeHelpCommand(out: anytype, use_color: bool, name: []const u8, description: []const u8) !void {
+fn writeHelpCommand(out: *std.Io.Writer, use_color: bool, name: []const u8, description: []const u8) !void {
     if (use_color) try out.writeAll(ansi.bold_green);
     try out.print("  {s}", .{name});
     if (use_color) try out.writeAll(ansi.reset);
@@ -184,6 +209,35 @@ pub fn printVersion() !void {
     const out = stdout.out();
     try out.print("codex-auth {s}\n", .{version.app_version});
     try out.flush();
+}
+
+pub fn warnDeprecatedLoginAlias(opts: LoginOptions) void {
+    if (opts.invocation != .add_alias) return;
+    const replacement = if (opts.launch_codex_login) "codex-auth login" else "codex-auth login --skip";
+    writeDeprecatedLoginAliasWarning(replacement, stderrColorEnabled()) catch {};
+}
+
+fn writeDeprecatedLoginAliasWarning(replacement: []const u8, use_color: bool) !void {
+    var buffer: [512]u8 = undefined;
+    var writer = std.fs.File.stderr().writer(&buffer);
+    const out = &writer.interface;
+    try writeDeprecatedLoginAliasWarningTo(out, replacement, use_color);
+    try out.flush();
+}
+
+pub fn writeDeprecatedLoginAliasWarningTo(out: *std.Io.Writer, replacement: []const u8, use_color: bool) !void {
+    if (use_color) try out.writeAll(ansi.bold_red);
+    try out.writeAll("warning:");
+    if (use_color) try out.writeAll(ansi.reset);
+    try out.writeAll(" ");
+    if (use_color) try out.writeAll(ansi.bold);
+    try out.writeAll("`add`");
+    if (use_color) try out.writeAll(ansi.reset);
+    try out.writeAll(" is deprecated; use ");
+    if (use_color) try out.writeAll(ansi.bold_green);
+    try out.print("`{s}`", .{replacement});
+    if (use_color) try out.writeAll(ansi.reset);
+    try out.writeAll("\n");
 }
 
 pub fn runCodexLogin(allocator: std.mem.Allocator) !void {

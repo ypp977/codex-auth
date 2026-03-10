@@ -50,7 +50,8 @@ This document describes how `codex-auth` stores accounts, synchronizes auth file
 ## First Run and Empty Registry
 
 - If `registry.json` is empty and `~/.codex/auth.json` exists, the tool auto-imports it into `accounts/<email_b64>.auth.json`.
-- If the registry is empty and there is no `auth.json`, `list` shows no accounts; use `codex-auth add` or `codex-auth import`.
+- If the registry is empty and there is no `auth.json`, `list` shows no accounts; use `codex-auth login` or `codex-auth import`.
+- `codex-auth add` is still accepted as a deprecated alias for `codex-auth login`.
 
 ## Account Identity (Email-Only)
 
@@ -75,7 +76,7 @@ The email is the unique key for an account.
 - Directory import scans only direct child files with a `.json` suffix (non-recursive), imports valid auth files, and skips invalid/malformed entries.
 - Only `import` can set account `alias` (via `--alias` on single-file import).
 - For directory import, `--alias` is ignored.
-- Non-import flows (`add`, auto-import on empty registry, and sync-created accounts) leave `alias` empty.
+- Non-import flows (`login`, auto-import on empty registry, and sync-created accounts) leave `alias` empty.
 
 ## Sync Behavior (Token Refresh Safety)
 

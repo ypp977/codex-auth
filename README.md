@@ -46,11 +46,13 @@ irm https://raw.githubusercontent.com/loongphy/codex-auth/main/scripts/install.p
 
 ```shell
 codex-auth list # list all accounts
-codex-auth add [--no-login] # add current account (runs `codex login` by default)
+codex-auth login [--skip] # login and add current account (runs `codex login` by default)
 codex-auth switch [<email>] # switch active account (interactive or partial/fragment match)
 codex-auth import <path> [--alias <alias>] # smart import: file -> single import, folder -> batch import
 codex-auth remove # remove accounts (interactive multi-select)
 ```
+
+Compatibility note: `codex-auth add` is still accepted as a deprecated alias for `codex-auth login`. The old `--no-login` flag has been replaced by `--skip`.
 
 ### Examples
 
@@ -63,7 +65,7 @@ codex-auth list
 Add the currently logged-in Codex account:
 
 ```shell
-codex-auth add
+codex-auth login
 ```
 
 Import an auth.json backup:
