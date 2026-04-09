@@ -1,147 +1,95 @@
-# Codex Auth (ypp977 fork)
+# Codex Auth
 
-![command list](https://github.com/user-attachments/assets/6c13a2d6-f9da-47ea-8ec8-0394fc072d40)
+[中文说明](./README.zh-CN.md)
 
-`codex-auth` is a command-line tool for switching Codex accounts.
-This fork keeps the quota-listing improvements and publishes standalone binaries through GitHub Releases.
+This project is based on [Loongphy/codex-auth](https://github.com/Loongphy/codex-auth). This fork mainly keeps and extends the quota listing, refresh, and multi-account comparison improvements.
 
-> [!IMPORTANT]
-> For **Codex CLI** and **Codex App** users, switch accounts, then restart the client for the new account to take effect.
->
-> If you use the CLI and want seamless automatic account switching without restarting, use the forked [`codext`](https://github.com/Loongphy/codext), an enhanced Codex CLI. Install it with `npm i -g @loongphy/codext` and run `codext`.
+## Added Features and Fixes
 
-## Supported Platforms
+- Added `list --refresh-all` to refresh all accounts before rendering the list
+- Added `--view left|used|raw` to inspect quota by remaining, used, or raw values
+- Added `SOURCE` to show whether quota data came from the API or local cache
+- Added `REFRESHED` to show when a quota snapshot was last updated
+- Clarified quota labels and fixed the old ambiguous `USAGE` semantics
+- Improved multi-account readability to reduce confusion caused by stale cached rows
 
-`codex-auth` works with these Codex clients:
+## Install by Platform
 
-- Codex CLI
-- VS Code extension
-- Codex App
-
-For the best experience, install the Codex CLI even if you mainly use the VS Code extension or the App, because it makes adding accounts easier:
-
-```shell
-npm install -g @openai/codex
-```
-
-After that, you can use `codex login`, `codex login --device-auth`, `codex-auth login`, or `codex-auth login --device-auth` to sign in and add accounts more easily.
-
-## Install
-
-This fork is distributed through GitHub Releases:
+Release page:
 
 ```shell
 https://github.com/ypp977/codex-auth/releases
 ```
 
-Download the archive for your platform, extract it, and put the `codex-auth` binary on your `PATH`.
+Download the archive for your platform, extract it, and put `codex-auth` or `codex-auth.exe` on your system `PATH`.
 
-If you prefer the upstream npm package instead:
+### macOS
 
-```shell
-npx @loongphy/codex-auth list
-```
+- Intel: `codex-auth-macOS-X64.tar.gz`
+- Apple Silicon / M-series: `codex-auth-macOS-ARM64.tar.gz`
 
-Release assets are built for Linux x64, macOS x64, macOS arm64, Windows x64, and Windows arm64.
-
-> [!NOTE]
-> If you only installed `@loongphy/codex-auth` with npm, you do not need any legacy cleanup steps.
-> Older Bash/PowerShell GitHub-release installs could leave a standalone `codex-auth` binary outside npm's install path.
-> If you previously used those legacy installers, remove the leftover binaries and profile changes during migration.
-
-### Uninstall
-
-#### npm
-
-Remove the npm package:
+Example:
 
 ```shell
-npm uninstall -g @loongphy/codex-auth
+tar -xzf codex-auth-macOS-ARM64.tar.gz
+chmod +x codex-auth
+mv codex-auth /opt/homebrew/bin/codex-auth
 ```
 
-#### Legacy Bash Installer
-
-For non-npm installs on Linux/macOS/WSL2 only:
+For Intel Macs, you may also use:
 
 ```shell
-rm -f ~/.local/bin/codex-auth
-rm -f ~/.local/bin/codex-auth-auto
-sed -i '/# Added by codex-auth installer/,+1d' ~/.bashrc ~/.bash_profile ~/.profile ~/.zshrc ~/.zprofile 2>/dev/null || true
+/usr/local/bin
 ```
 
-If you used fish, also remove the old profile entry:
+### Linux
+
+Download:
+
+- `codex-auth-Linux-X64.tar.gz`
+
+Install:
 
 ```shell
-sed -i '/# Added by codex-auth installer/,+3d' ~/.config/fish/config.fish 2>/dev/null || true
+tar -xzf codex-auth-Linux-X64.tar.gz
+chmod +x codex-auth
+sudo mv codex-auth /usr/local/bin/codex-auth
 ```
 
-#### Legacy PowerShell Installer
+### Windows
 
-For non-npm installs on Windows only:
+Download:
 
-```powershell
-Remove-Item "$env:LOCALAPPDATA\codex-auth\bin\codex-auth.exe" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:LOCALAPPDATA\codex-auth\bin\codex-auth-auto.exe" -Force -ErrorAction SilentlyContinue
-[Environment]::SetEnvironmentVariable(
-  "Path",
-  (($env:Path -split ';' | Where-Object { $_ -and $_ -ne "$env:LOCALAPPDATA\codex-auth\bin" }) -join ';'),
-  "User"
-)
-```
+- `codex-auth-Windows-X64.zip`
+- `codex-auth-Windows-ARM64.zip`
 
-## Commands
+Install:
 
-## Quota Listing Improvements
+1. Extract the zip archive
+2. Move `codex-auth.exe` to a fixed directory such as `C:\Tools\codex-auth\`
+3. Add that directory to your system `Path`
 
-This fork improves the account list output for quota-heavy multi-account use:
-
-- clarify quota semantics by separating `left`, `used`, and `raw` views
-- add `list --refresh-all` so all accounts can be refreshed before comparison
-- show `SOURCE` to distinguish API-backed data from local cached data
-- show `REFRESHED` so it is easier to judge whether a row is stale
-- rename the old ambiguous usage-style display to clearer quota-oriented labels
-
-These changes are mainly intended to make cross-account quota comparison easier and to reduce confusion when non-active accounts are still showing cached data.
-
-### Account Management
-
-| Command | Description |
-|---------|-------------|
-| `codex-auth list [--refresh-all] [--view <left\\|used\\|raw>]` | List all accounts with selectable quota views and optional full refresh |
-| `codex-auth login [--device-auth]` | Run `codex login` (optionally with `--device-auth`), then add the current account |
-| `codex-auth switch [<email>]` | Switch active account interactively or by partial match |
-| `codex-auth remove` | Remove accounts with interactive multi-select |
-| `codex-auth status` | Show auto-switch, service, and usage status |
-
-### Import
-
-| Command | Description |
-|---------|-------------|
-| `codex-auth import <path> [--alias <alias>]` | Import a single file or batch import from a folder |
-| `codex-auth import --cpa [<path>]` | Import [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) token JSON |
-| `codex-auth import --purge [<path>]` | Rebuild `registry.json` from existing auth files |
-
-### Configuration
-
-| Command | Description |
-|---------|-------------|
-| `codex-auth config auto enable\|disable` | Enable or disable background auto-switching |
-| `codex-auth config auto [--5h <%>] [--weekly <%>]` | Set auto-switch thresholds |
-| `codex-auth config api enable\|disable` | Enable or disable both usage refresh and team name refresh API calls |
-
----
-
-## Examples
-
-### List Accounts
+### Verify the Installation
 
 ```shell
+codex-auth --version
 codex-auth list
 ```
 
-Refresh all account usage through the API before listing:
+Current releases include 5 build targets:
+
+- Linux x64
+- macOS x64
+- macOS arm64
+- Windows x64
+- Windows arm64
+
+## Common Usage
+
+List accounts and quota:
 
 ```shell
+codex-auth list
 codex-auth list --refresh-all
 ```
 
@@ -153,193 +101,40 @@ codex-auth list --view used
 codex-auth list --view raw
 ```
 
-`list` now also shows:
-
-- `SOURCE`: whether the latest quota snapshot came from `api` or `local`
-- `REFRESHED`: when that quota snapshot was last updated
-
-### Switch Account
-
-Interactive: shows email, 5h, weekly, and last activity.
+Switch accounts and check status:
 
 ```shell
 codex-auth switch
+codex-auth status
 ```
 
-Before the picker opens, the current active account's usage is refreshed once so the selected row is not stale. The newly selected account is not refreshed after the switch completes.
-
-![command switch](https://github.com/user-attachments/assets/48a86acf-2a6e-4206-a8c4-591989fdc0df)
-
-Non-interactive: fuzzy match by email or alias.
-
-```shell
-codex-auth switch john             # match any account containing "john"
-codex-auth switch john@gmail.com   # match by full or partial email
-codex-auth switch work             # match by alias set during import
-```
-
-If the keyword matches multiple accounts, the command falls back to interactive selection. Press `q` to quit without switching.
-
-### Remove Accounts
-
-```shell
-codex-auth remove
-```
-
-### Login (Add Account)
-
-Add the currently logged-in Codex account:
+Add or import accounts:
 
 ```shell
 codex-auth login
 codex-auth login --device-auth
-```
-
-### Import
-
-#### Single File
-
-```shell
 codex-auth import /path/to/auth.json --alias personal
+codex-auth import /path/to/auth-folder
+codex-auth import --purge
 ```
 
-#### Batch Import from a Folder
-
-Scans all `.json` files in the directory:
-
-```shell
-codex-auth import /path/to/auth-exports
-```
-
-Typical output:
-
-```text
-Scanning /path/to/auth-exports...
-  ✓ imported  token_ryan.taylor.alpha@email.com
-  ✓ updated   token_jane.smith.alpha@email.com
-  ✗ skipped   token_invalid: MalformedJson
-Import Summary: 1 imported, 1 updated, 1 skipped (total 3 files)
-```
-
-`stdout` carries scanning, success, and summary lines. Skipped files and warnings stay on `stderr`.
-
-#### Import CLIProxyAPI (CPA) Tokens
-
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) stores tokens as flat JSON under `~/.cli-proxy-api/`. Import them directly without conversion:
-
-```shell
-codex-auth import --cpa                                  # scan default ~/.cli-proxy-api/*.json
-codex-auth import --cpa /path/to/cpa-dir                 # scan a specific directory
-codex-auth import --cpa /path/to/token.json --alias bob  # import a single CPA file
-```
-
-#### Fix Broken Account Data (Rebuild Registry)
-
-If `codex-auth list` shows missing accounts or wrong usage data, the internal registry file may be out of sync with the actual auth files on disk. This command re-reads all auth files and rebuilds the registry from scratch:
-
-```shell
-codex-auth import --purge                                # rebuild from ~/.codex/accounts/*.auth.json
-codex-auth import --purge /path/to/auth-exports          # rebuild from a specific folder
-```
-
-This does not import new files. It repairs the registry index for auth snapshots that already exist on disk.
-
-### Show Status
-
-```shell
-codex-auth status
-```
-
-### Config
-
-#### Auto-Switch
-
-Enable or disable:
+Configure auto-switch:
 
 ```shell
 codex-auth config auto enable
 codex-auth config auto disable
+codex-auth config auto --5h 20 --weekly 10
 ```
 
-`config auto enable` prints the current usage mode after installing the watcher, so you can immediately see whether auto-switch is running with default API-backed usage or local-only fallback semantics.
-
-Adjust thresholds:
-
-```shell
-codex-auth config auto --5h 12
-codex-auth config auto --5h 12 --weekly 8
-codex-auth config auto --weekly 8
-```
-
-When auto-switching is enabled, a long-running background watcher refreshes the active account's usage and silently switches accounts when:
-
-- 5h remaining drops below the configured 5h threshold (default `10%`), or
-- weekly remaining drops below the configured weekly threshold (default `5%`)
-
-The managed background worker is long-running on all supported platforms:
-
-- Linux/WSL: persistent `systemd --user` service
-- macOS: `LaunchAgent`
-- Windows: scheduled task that launches the long-running helper at logon, restarts it after failures, has no 72-hour execution cap, and also starts it immediately on enable
-
-#### Usage Refresh Source
-
-API-backed fallback:
+Configure API refresh:
 
 ```shell
 codex-auth config api enable
-```
-
-Local-only, no usage API calls:
-
-```shell
 codex-auth config api disable
 ```
 
-Changing `config api` updates `registry.json` immediately. `api enable` is shown as API mode and `api disable` is shown as local mode.
+Notes:
 
-## Q&A
-
-### Why is my usage limit not refreshing?
-
-If `codex-auth` is using local-only usage refresh, it reads the newest `~/.codex/sessions/**/rollout-*.jsonl` file. Recent Codex builds often write `token_count` events with `rate_limits: null`. The local files may still contain older usable usage limit data, but in practice they can lag by several hours, so local-only refresh may show a usage limit snapshot from hours ago instead of your latest state.
-
-- Upstream Codex issue: [openai/codex#14880](https://github.com/openai/codex/issues/14880)
-
-You can switch usage limit refresh to the usage API with:
-
-```shell
-codex-auth config api enable
-```
-
-Then confirm the current mode with:
-
-```shell
-codex-auth status
-```
-
-`status` should show `usage: api`.
-
-Upgrade notes:
-
-- If you are upgrading from `v0.1.x` to the latest `v0.2.x`, API usage refresh is enabled by default.
-- If you previously used an early `v0.2` prerelease/test build and `status` still shows `usage: local`, run `codex-auth config api enable` once to switch back to API mode.
-
-Verify with:
-
-```shell
-codex exec "say hello"
-```
-
-## Disclaimer
-
-This project is provided as-is and use is at your own risk.
-
-**Usage Data Refresh Source:**
-`codex-auth` supports two sources for refreshing account usage/usage limit information:
-
-1. **API (default):** When `config api enable` is on, the tool makes direct HTTPS requests to OpenAI's endpoints using your account's access token. This enables both usage refresh and team name refresh.
-2. **Local-only:** When `config api disable` is on, the tool scans local `~/.codex/sessions/*/rollout-*.jsonl` files for usage data and skips team name refresh API calls. This mode is safer, but it can be less accurate because recent Codex rollout files often contain `rate_limits: null`, so the latest local usage limit data may lag by several hours.
-
-**API Call Declaration:**
-By enabling API(`codex-auth config api enable`), this tool will send your ChatGPT access token to OpenAI's servers, including `https://chatgpt.com/backend-api/wham/usage` for usage limit and `https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27` for team name. This behavior may be detected by OpenAI and could violate their terms of service, potentially leading to account suspension or other risks. The decision to use this feature and any resulting consequences are entirely yours.
+- `SOURCE` helps you tell whether quota data came from the API or local cache
+- `REFRESHED` helps you judge whether a row may already be stale
+- If you switch accounts for Codex CLI or Codex App, restart the client so the new account takes effect
