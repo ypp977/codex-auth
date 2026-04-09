@@ -88,6 +88,18 @@ Remove-Item "$env:LOCALAPPDATA\codex-auth\bin\codex-auth-auto.exe" -Force -Error
 
 ## Commands
 
+## Quota Listing Improvements
+
+This branch improves the account list output for quota-heavy multi-account use:
+
+- clarify quota semantics by separating `left`, `used`, and `raw` views
+- add `list --refresh-all` so all accounts can be refreshed before comparison
+- show `SOURCE` to distinguish API-backed data from local cached data
+- show `REFRESHED` so it is easier to judge whether a row is stale
+- rename the old ambiguous usage-style display to clearer quota-oriented labels
+
+These changes are mainly intended to make cross-account quota comparison easier and to reduce confusion when non-active accounts are still showing cached data.
+
 ### Account Management
 
 | Command | Description |
