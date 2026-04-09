@@ -1,15 +1,15 @@
 {
   "name": "@loongphy/codex-auth",
-  "version": "0.2.3-alpha.2",
+  "version": "0.2.3-ypp.1",
   "description": "CLI for switching Codex accounts",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Loongphy/codex-auth"
+    "url": "https://github.com/ypp977/codex-auth"
   },
-  "homepage": "https://github.com/Loongphy/codex-auth",
+  "homepage": "https://github.com/ypp977/codex-auth",
   "bugs": {
-    "url": "https://github.com/Loongphy/codex-auth/issues"
+    "url": "https://github.com/ypp977/codex-auth/issues"
   },
   "bin": {
     "codex-auth": "bin/codex-auth.js"
@@ -20,11 +20,11 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@loongphy/codex-auth-linux-x64": "0.2.3-alpha.2",
-    "@loongphy/codex-auth-darwin-x64": "0.2.3-alpha.2",
-    "@loongphy/codex-auth-darwin-arm64": "0.2.3-alpha.2",
-    "@loongphy/codex-auth-win32-x64": "0.2.3-alpha.2",
-    "@loongphy/codex-auth-win32-arm64": "0.2.3-alpha.2"
+    "@loongphy/codex-auth-linux-x64": "0.2.3-ypp.1",
+    "@loongphy/codex-auth-darwin-x64": "0.2.3-ypp.1",
+    "@loongphy/codex-auth-darwin-arm64": "0.2.3-ypp.1",
+    "@loongphy/codex-auth-win32-x64": "0.2.3-ypp.1",
+    "@loongphy/codex-auth-win32-arm64": "0.2.3-ypp.1"
   },
   "scripts": {
     "check:versions": "node scripts/npm/check-versions.mjs",

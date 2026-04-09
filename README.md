@@ -1,8 +1,9 @@
-# Codex Auth
+# Codex Auth (ypp977 fork)
 
 ![command list](https://github.com/user-attachments/assets/6c13a2d6-f9da-47ea-8ec8-0394fc072d40)
 
 `codex-auth` is a command-line tool for switching Codex accounts.
+This fork keeps the quota-listing improvements and publishes standalone binaries through GitHub Releases.
 
 > [!IMPORTANT]
 > For **Codex CLI** and **Codex App** users, switch accounts, then restart the client for the new account to take effect.
@@ -27,19 +28,21 @@ After that, you can use `codex login`, `codex login --device-auth`, `codex-auth 
 
 ## Install
 
-Install with npm:
+This fork is distributed through GitHub Releases:
 
 ```shell
-npm install -g @loongphy/codex-auth
+https://github.com/ypp977/codex-auth/releases
 ```
 
-  You can also run it without a global install:
+Download the archive for your platform, extract it, and put the `codex-auth` binary on your `PATH`.
+
+If you prefer the upstream npm package instead:
 
 ```shell
 npx @loongphy/codex-auth list
 ```
 
-  npm packages currently support Linux x64, macOS x64, macOS arm64, Windows x64, and Windows arm64.
+Release assets are built for Linux x64, macOS x64, macOS arm64, Windows x64, and Windows arm64.
 
 > [!NOTE]
 > If you only installed `@loongphy/codex-auth` with npm, you do not need any legacy cleanup steps.
@@ -90,7 +93,7 @@ Remove-Item "$env:LOCALAPPDATA\codex-auth\bin\codex-auth-auto.exe" -Force -Error
 
 ## Quota Listing Improvements
 
-This branch improves the account list output for quota-heavy multi-account use:
+This fork improves the account list output for quota-heavy multi-account use:
 
 - clarify quota semantics by separating `left`, `used`, and `raw` views
 - add `list --refresh-all` so all accounts can be refreshed before comparison
