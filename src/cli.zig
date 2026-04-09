@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const display_rows = @import("display_rows.zig");
+const format = @import("format.zig");
 const registry = @import("registry.zig");
 const io_util = @import("io_util.zig");
 const timefmt = @import("timefmt.zig");
@@ -31,7 +32,10 @@ fn stderrColorEnabled() bool {
     return std.fs.File.stderr().isTty();
 }
 
-pub const ListOptions = struct {};
+pub const ListOptions = struct {
+    refresh_all: bool = false,
+    view: format.UsageView = .left,
+};
 pub const LoginOptions = struct {
     device_auth: bool = false,
 };
@@ -130,7 +134,40 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: []const [:0]const u8) !Pars
     }
 
     if (std.mem.eql(u8, cmd, "list")) {
-        return try parseSimpleCommandArgs(allocator, "list", .list, .{ .list = .{} }, args[2..]);
+        if (args.len == 3 and isHelpFlag(std.mem.sliceTo(args[2], 0))) {
+            return .{ .command = .{ .help = .list } };
+        }
+
+        var opts: ListOptions = .{};
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            const arg = std.mem.sliceTo(args[i], 0);
+            if (std.mem.eql(u8, arg, "--refresh-all")) {
+                if (opts.refresh_all) {
+                    return usageErrorResult(allocator, .list, "duplicate `--refresh-all` for `list`.", .{});
+                }
+                opts.refresh_all = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--view")) {
+                if (i + 1 >= args.len) {
+                    return usageErrorResult(allocator, .list, "missing value for `--view`.", .{});
+                }
+                const raw_view = std.mem.sliceTo(args[i + 1], 0);
+                opts.view = parseListView(raw_view) orelse
+                    return usageErrorResult(allocator, .list, "invalid `--view` value `{s}`; expected left, used, or raw.", .{raw_view});
+                i += 1;
+                continue;
+            }
+            if (isHelpFlag(arg)) {
+                return usageErrorResult(allocator, .list, "`--help` must be used by itself for `list`.", .{});
+            }
+            if (std.mem.startsWith(u8, arg, "-")) {
+                return usageErrorResult(allocator, .list, "unknown flag `{s}` for `list`.", .{arg});
+            }
+            return usageErrorResult(allocator, .list, "unexpected argument `{s}` for `list`.", .{arg});
+        }
+        return .{ .command = .{ .list = opts } };
     }
 
     if (std.mem.eql(u8, cmd, "login")) {
@@ -516,7 +553,7 @@ pub fn writeHelp(
 
     const commands = [_]HelpEntry{
         .{ .name = "--version, -V", .description = "Show version" },
-        .{ .name = "list", .description = "List available accounts" },
+        .{ .name = "list [--refresh-all] [--view <left|used|raw>]", .description = "List accounts with a selectable quota view" },
         .{ .name = "status", .description = "Show auto-switch and usage API status" },
         .{ .name = "login", .description = "Login and add the current account" },
         .{ .name = "import", .description = "Import auth files or rebuild registry" },
@@ -577,6 +614,13 @@ fn parsePercentArg(raw: []const u8) ?u8 {
     const value = std.fmt.parseInt(u8, raw, 10) catch return null;
     if (value < 1 or value > 100) return null;
     return value;
+}
+
+fn parseListView(raw: []const u8) ?format.UsageView {
+    if (std.mem.eql(u8, raw, "left")) return .left;
+    if (std.mem.eql(u8, raw, "used")) return .used;
+    if (std.mem.eql(u8, raw, "raw")) return .raw;
+    return null;
 }
 
 const HelpEntry = struct {
@@ -677,7 +721,7 @@ fn commandDescriptionForTopic(topic: HelpTopic) []const u8 {
 
 fn commandHelpHasExamples(topic: HelpTopic) bool {
     return switch (topic) {
-        .import_auth, .switch_account, .remove_account, .config, .daemon => true,
+        .list, .import_auth, .switch_account, .remove_account, .config, .daemon => true,
         else => false,
     };
 }
@@ -690,7 +734,12 @@ fn writeUsageSection(out: *std.Io.Writer, topic: HelpTopic) !void {
             try out.writeAll("  codex-auth --help\n");
             try out.writeAll("  codex-auth help <command>\n");
         },
-        .list => try out.writeAll("  codex-auth list\n"),
+        .list => {
+            try out.writeAll("  codex-auth list\n");
+            try out.writeAll("  codex-auth list --refresh-all\n");
+            try out.writeAll("  codex-auth list --view used\n");
+            try out.writeAll("  codex-auth list --view raw --refresh-all\n");
+        },
         .status => try out.writeAll("  codex-auth status\n"),
         .login => {
             try out.writeAll("  codex-auth login\n");
@@ -734,7 +783,12 @@ fn writeExamplesSection(out: *std.Io.Writer, topic: HelpTopic) !void {
             try out.writeAll("  codex-auth import /path/to/auth.json --alias personal\n");
             try out.writeAll("  codex-auth config auto enable\n");
         },
-        .list => try out.writeAll("  codex-auth list\n"),
+        .list => {
+            try out.writeAll("  codex-auth list\n");
+            try out.writeAll("  codex-auth list --refresh-all\n");
+            try out.writeAll("  codex-auth list --view used\n");
+            try out.writeAll("  codex-auth list --view raw --refresh-all\n");
+        },
         .status => try out.writeAll("  codex-auth status\n"),
         .login => {
             try out.writeAll("  codex-auth login\n");
@@ -1586,9 +1640,9 @@ fn renderSwitchList(
     try out.writeAll("  ");
     try writePadded(out, "PLAN", widths.plan);
     try out.writeAll("  ");
-    try writePadded(out, "5H", widths.rate_5h);
+    try writePadded(out, "5H LEFT", widths.rate_5h);
     try out.writeAll("  ");
-    try writePadded(out, "WEEKLY", widths.rate_week);
+    try writePadded(out, "WEEK LEFT", widths.rate_week);
     try out.writeAll("  ");
     try writePadded(out, "LAST", widths.last);
     try out.writeAll("\n");
@@ -1661,9 +1715,9 @@ fn renderRemoveList(
     try out.writeAll("  ");
     try writePadded(out, "PLAN", widths.plan);
     try out.writeAll("  ");
-    try writePadded(out, "5H", widths.rate_5h);
+    try writePadded(out, "5H LEFT", widths.rate_5h);
     try out.writeAll("  ");
-    try writePadded(out, "WEEKLY", widths.rate_week);
+    try writePadded(out, "WEEK LEFT", widths.rate_week);
     try out.writeAll("  ");
     try writePadded(out, "LAST", widths.last);
     try out.writeAll("\n");
@@ -1799,8 +1853,8 @@ fn buildSwitchRows(allocator: std.mem.Allocator, reg: *registry.Registry) !Switc
     var widths = SwitchWidths{
         .email = "EMAIL".len,
         .plan = "PLAN".len,
-        .rate_5h = "5H".len,
-        .rate_week = "WEEKLY".len,
+        .rate_5h = "5H LEFT".len,
+        .rate_week = "WEEK LEFT".len,
         .last = "LAST".len,
     };
     const now = std.time.timestamp();
@@ -1861,8 +1915,8 @@ fn buildSwitchRowsFromIndices(
     var widths = SwitchWidths{
         .email = "EMAIL".len,
         .plan = "PLAN".len,
-        .rate_5h = "5H".len,
-        .rate_week = "WEEKLY".len,
+        .rate_5h = "5H LEFT".len,
+        .rate_week = "WEEK LEFT".len,
         .last = "LAST".len,
     };
     const now = std.time.timestamp();

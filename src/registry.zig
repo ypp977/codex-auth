@@ -7,7 +7,8 @@ const c_time = @cImport({
 
 pub const PlanType = enum { free, plus, pro, team, business, enterprise, edu, unknown };
 pub const AuthMode = enum { chatgpt, apikey };
-pub const current_schema_version: u32 = 3;
+pub const UsageSource = enum { api, local };
+pub const current_schema_version: u32 = 4;
 pub const min_supported_schema_version: u32 = 2;
 pub const default_auto_switch_threshold_5h_percent: u8 = 10;
 pub const default_auto_switch_threshold_weekly_percent: u8 = 5;
@@ -75,6 +76,7 @@ pub const AccountRecord = struct {
     last_used_at: ?i64,
     last_usage: ?RateLimitSnapshot,
     last_usage_at: ?i64,
+    last_usage_source: ?UsageSource,
     last_local_rollout: ?RolloutSignature,
 };
 
@@ -1533,6 +1535,16 @@ pub fn setActiveAccountKey(allocator: std.mem.Allocator, reg: *Registry, account
 }
 
 pub fn updateUsage(allocator: std.mem.Allocator, reg: *Registry, account_key: []const u8, snapshot: RateLimitSnapshot) void {
+    updateUsageWithSource(allocator, reg, account_key, snapshot, null);
+}
+
+pub fn updateUsageWithSource(
+    allocator: std.mem.Allocator,
+    reg: *Registry,
+    account_key: []const u8,
+    snapshot: RateLimitSnapshot,
+    source: ?UsageSource,
+) void {
     const now = std.time.timestamp();
     for (reg.accounts.items) |*rec| {
         if (std.mem.eql(u8, rec.account_key, account_key)) {
@@ -1543,6 +1555,7 @@ pub fn updateUsage(allocator: std.mem.Allocator, reg: *Registry, account_key: []
             }
             rec.last_usage = snapshot;
             rec.last_usage_at = now;
+            rec.last_usage_source = source;
             break;
         }
     }
@@ -1914,6 +1927,7 @@ pub fn accountFromAuth(
         .last_used_at = null,
         .last_usage = null,
         .last_usage_at = null,
+        .last_usage_source = null,
         .last_local_rollout = null,
     };
 }
@@ -1934,6 +1948,14 @@ fn mergeAccountRecord(allocator: std.mem.Allocator, dest: *AccountRecord, incomi
     if (recordFreshness(&merged_incoming) > recordFreshness(dest)) {
         if (merged_incoming.account_name == null and dest.account_name != null) {
             merged_incoming.account_name = cloneOptionalStringAlloc(allocator, dest.account_name) catch unreachable;
+        }
+        if (merged_incoming.last_usage == null and dest.last_usage != null) {
+            merged_incoming.last_usage = cloneRateLimitSnapshot(allocator, dest.last_usage.?) catch unreachable;
+            merged_incoming.last_usage_at = dest.last_usage_at;
+            merged_incoming.last_usage_source = dest.last_usage_source;
+            if (dest.last_local_rollout) |signature| {
+                merged_incoming.last_local_rollout = cloneRolloutSignature(allocator, signature) catch unreachable;
+            }
         }
         freeAccountRecord(allocator, dest);
         dest.* = merged_incoming;
@@ -2066,6 +2088,7 @@ fn parseAccountRecord(allocator: std.mem.Allocator, obj: std.json.ObjectMap) !Ac
         .last_used_at = readInt(obj.get("last_used_at")),
         .last_usage = null,
         .last_usage_at = readInt(obj.get("last_usage_at")),
+        .last_usage_source = null,
         .last_local_rollout = null,
     };
     errdefer freeAccountRecord(allocator, &rec);
@@ -2085,8 +2108,17 @@ fn parseAccountRecord(allocator: std.mem.Allocator, obj: std.json.ObjectMap) !Ac
     if (obj.get("last_usage")) |u| {
         rec.last_usage = parseUsage(allocator, u);
     }
+    if (obj.get("last_usage_source")) |v| {
+        switch (v) {
+            .string => |s| rec.last_usage_source = parseUsageSource(s),
+            else => {},
+        }
+    }
     if (obj.get("last_local_rollout")) |v| {
         rec.last_local_rollout = parseRolloutSignature(allocator, v);
+    }
+    if (rec.last_usage != null and rec.last_usage_source == null and rec.last_local_rollout != null) {
+        rec.last_usage_source = .local;
     }
     return rec;
 }
@@ -2190,6 +2222,7 @@ fn migrateLegacyRecord(
         .last_used_at = legacy.last_used_at,
         .last_usage = legacy.last_usage,
         .last_usage_at = legacy.last_usage_at,
+        .last_usage_source = null,
         .last_local_rollout = null,
     };
     legacy.last_usage = null;
@@ -2407,7 +2440,7 @@ pub fn loadRegistry(allocator: std.mem.Allocator, codex_home: []const u8) !Regis
         (schema_version == current_schema_version and currentLayoutNeedsRewrite(root_obj));
     var reg = switch (schema_version) {
         2 => try loadLegacyRegistryV2(allocator, codex_home, root_obj),
-        3 => try loadCurrentRegistry(allocator, root_obj),
+        3, 4 => try loadCurrentRegistry(allocator, root_obj),
         else => {
             std.log.err(
                 "registry schema_version {d} is older than the minimum supported {d}; use an intermediate codex-auth release or import --purge",
@@ -2523,6 +2556,12 @@ fn parsePlanType(s: []const u8) ?PlanType {
 fn parseAuthMode(s: []const u8) ?AuthMode {
     if (std.mem.eql(u8, s, "chatgpt")) return .chatgpt;
     if (std.mem.eql(u8, s, "apikey")) return .apikey;
+    return null;
+}
+
+fn parseUsageSource(s: []const u8) ?UsageSource {
+    if (std.mem.eql(u8, s, "api")) return .api;
+    if (std.mem.eql(u8, s, "local")) return .local;
     return null;
 }
 

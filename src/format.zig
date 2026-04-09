@@ -23,21 +23,150 @@ fn planDisplay(rec: *const registry.AccountRecord, missing: []const u8) []const 
     return missing;
 }
 
-pub fn printAccounts(reg: *registry.Registry) !void {
-    try printAccountsTable(reg);
+pub const UsageView = enum { left, used, raw };
+
+pub const ListRenderOptions = struct {
+    usage_view: UsageView = .left,
+};
+
+pub fn printAccounts(reg: *registry.Registry, options: ListRenderOptions) !void {
+    try printAccountsTable(reg, options);
 }
 
-fn printAccountsTable(reg: *registry.Registry) !void {
+fn usageHeaderFor(view: UsageView, minutes: i64, width: usize) []const u8 {
+    const short = if (minutes == 300) "5H" else "WEEK";
+    const medium = if (minutes == 300)
+        switch (view) {
+            .left => "5H LEFT",
+            .used => "5H USED",
+            .raw => "5H RAW",
+        }
+    else
+        switch (view) {
+            .left => "WEEKLY LEFT",
+            .used => "WEEKLY USED",
+            .raw => "WEEKLY RAW",
+        };
+    const fallback = if (minutes == 300)
+        switch (view) {
+            .left => "LEFT",
+            .used => "USED",
+            .raw => "RAW",
+        }
+    else
+        switch (view) {
+            .left => "W LEFT",
+            .used => "W USED",
+            .raw => "W RAW",
+        };
+
+    if (width >= medium.len) return medium;
+    if (width >= fallback.len) return fallback;
+    return short;
+}
+
+fn sourceLabel(rec: *const registry.AccountRecord) []const u8 {
+    return if (rec.last_usage_source) |source| switch (source) {
+        .api => "api",
+        .local => "local",
+    } else "-";
+}
+
+fn formatUsageFullAlloc(view: UsageView, window: ?registry.RateLimitWindow) ![]u8 {
+    return formatUsageUiAlloc(view, window, 0);
+}
+
+fn formatUsageUiAlloc(view: UsageView, window: ?registry.RateLimitWindow, width: usize) ![]u8 {
+    if (window == null) return try std.fmt.allocPrint(std.heap.page_allocator, "-", .{});
+    if (window.?.resets_at == null) return try std.fmt.allocPrint(std.heap.page_allocator, "-", .{});
+
+    const now = std.time.timestamp();
+    const reset_at = window.?.resets_at.?;
+    const used = usedPercent(window.?.used_percent);
+    const left = remainingPercent(window.?.used_percent);
+    if (now >= reset_at) {
+        return switch (view) {
+            .left => std.fmt.allocPrint(std.heap.page_allocator, "100%", .{}),
+            .used => std.fmt.allocPrint(std.heap.page_allocator, "0%", .{}),
+            .raw => std.fmt.allocPrint(std.heap.page_allocator, "u0/l100", .{}),
+        };
+    }
+
+    var parts = try resetPartsAlloc(reset_at, now);
+    defer parts.deinit();
+
+    return switch (view) {
+        .left => formatSimpleUsageAlloc(left, parts, width),
+        .used => formatSimpleUsageAlloc(used, parts, width),
+        .raw => formatRawUsageAlloc(used, left, parts, width),
+    };
+}
+
+fn formatSimpleUsageAlloc(value: i64, parts: ResetParts, width: usize) ![]u8 {
+    const same_day = [_][]u8{
+        try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s})", .{ value, parts.time }),
+        try std.fmt.allocPrint(std.heap.page_allocator, "{d}%", .{value}),
+    };
+    defer std.heap.page_allocator.free(same_day[0]);
+    defer std.heap.page_allocator.free(same_day[1]);
+
+    if (parts.same_day) {
+        if (width == 0 or width >= same_day[0].len) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{same_day[0]});
+        return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{same_day[1]});
+    }
+
+    const candidates = [_][]u8{
+        try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s} on {s})", .{ value, parts.time, parts.date }),
+        try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s})", .{ value, parts.date }),
+        try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s})", .{ value, parts.time }),
+        try std.fmt.allocPrint(std.heap.page_allocator, "{d}%", .{value}),
+    };
+    defer for (candidates) |candidate| std.heap.page_allocator.free(candidate);
+
+    for (candidates) |candidate| {
+        if (width == 0 or width >= candidate.len) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidate});
+    }
+    return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidates[candidates.len - 1]});
+}
+
+fn formatRawUsageAlloc(used: i64, left: i64, parts: ResetParts, width: usize) ![]u8 {
+    const same_day = [_][]u8{
+        try std.fmt.allocPrint(std.heap.page_allocator, "u{d}/l{d} ({s})", .{ used, left, parts.time }),
+        try std.fmt.allocPrint(std.heap.page_allocator, "u{d}/l{d}", .{ used, left }),
+    };
+    defer std.heap.page_allocator.free(same_day[0]);
+    defer std.heap.page_allocator.free(same_day[1]);
+
+    if (parts.same_day) {
+        if (width == 0 or width >= same_day[0].len) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{same_day[0]});
+        return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{same_day[1]});
+    }
+
+    const candidates = [_][]u8{
+        try std.fmt.allocPrint(std.heap.page_allocator, "u{d}/l{d} ({s} on {s})", .{ used, left, parts.time, parts.date }),
+        try std.fmt.allocPrint(std.heap.page_allocator, "u{d}/l{d} ({s})", .{ used, left, parts.date }),
+        try std.fmt.allocPrint(std.heap.page_allocator, "u{d}/l{d}", .{ used, left }),
+    };
+    defer for (candidates) |candidate| std.heap.page_allocator.free(candidate);
+
+    for (candidates) |candidate| {
+        if (width == 0 or width >= candidate.len) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidate});
+    }
+    return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidates[candidates.len - 1]});
+}
+
+fn printAccountsTable(reg: *registry.Registry, options: ListRenderOptions) !void {
     var stdout: io_util.Stdout = undefined;
     stdout.init();
     const out = stdout.out();
-    const headers = [_][]const u8{ "ACCOUNT", "PLAN", "5H USAGE", "WEEKLY USAGE", "LAST ACTIVITY" };
+    const headers = [_][]const u8{ "ACCOUNT", "PLAN", "", "", "SOURCE", "REFRESHED" };
     var widths = [_]usize{
         headers[0].len,
         headers[1].len,
-        headers[2].len,
-        headers[3].len,
+        0,
+        0,
         headers[4].len,
+        headers[5].len,
     };
     const now = std.time.timestamp();
     const prefix_len: usize = 2;
@@ -54,17 +183,18 @@ fn printAccountsTable(reg: *registry.Registry) !void {
             const plan = planDisplay(&rec, "-");
             const rate_5h = resolveRateWindow(rec.last_usage, 300, true);
             const rate_week = resolveRateWindow(rec.last_usage, 10080, false);
-            const rate_5h_str = try formatRateLimitFullAlloc(rate_5h);
+            const rate_5h_str = try formatUsageFullAlloc(options.usage_view, rate_5h);
             defer std.heap.page_allocator.free(rate_5h_str);
-            const rate_week_str = try formatRateLimitFullAlloc(rate_week);
+            const rate_week_str = try formatUsageFullAlloc(options.usage_view, rate_week);
             defer std.heap.page_allocator.free(rate_week_str);
-            const last_str = try timefmt.formatRelativeTimeOrDashAlloc(std.heap.page_allocator, rec.last_usage_at, now);
-            defer std.heap.page_allocator.free(last_str);
+            const refreshed_str = try timefmt.formatRelativeTimeOrDashAlloc(std.heap.page_allocator, rec.last_usage_at, now);
+            defer std.heap.page_allocator.free(refreshed_str);
 
             widths[1] = @max(widths[1], plan.len);
             widths[2] = @max(widths[2], rate_5h_str.len);
             widths[3] = @max(widths[3], rate_week_str.len);
-            widths[4] = @max(widths[4], last_str.len);
+            widths[4] = @max(widths[4], sourceLabel(&rec).len);
+            widths[5] = @max(widths[5], refreshed_str.len);
         }
     }
 
@@ -75,15 +205,18 @@ fn printAccountsTable(reg: *registry.Registry) !void {
     defer std.heap.page_allocator.free(h0);
     const h1 = try truncateAlloc(headers[1], widths[1]);
     defer std.heap.page_allocator.free(h1);
-    const header_5h = if (widths[2] >= "5H USAGE".len) "5H USAGE" else "5H";
+    const header_5h = usageHeaderFor(options.usage_view, 300, widths[2]);
     const h2 = try truncateAlloc(header_5h, widths[2]);
     defer std.heap.page_allocator.free(h2);
-    const header_week = if (widths[3] >= "WEEKLY USAGE".len) "WEEKLY USAGE" else if (widths[3] >= "WEEKLY".len) "WEEKLY" else if (widths[3] >= "WEEK".len) "WEEK" else "W";
+    const header_week = usageHeaderFor(options.usage_view, 10080, widths[3]);
     const h3 = try truncateAlloc(header_week, widths[3]);
     defer std.heap.page_allocator.free(h3);
-    const header_last = if (widths[4] >= "LAST ACTIVITY".len) "LAST ACTIVITY" else "LAST";
-    const h4 = try truncateAlloc(header_last, widths[4]);
+    const header_source = if (widths[4] >= "SOURCE".len) "SOURCE" else "SRC";
+    const h4 = try truncateAlloc(header_source, widths[4]);
     defer std.heap.page_allocator.free(h4);
+    const header_refreshed = if (widths[5] >= "REFRESHED".len) "REFRESHED" else "REF";
+    const h5 = try truncateAlloc(header_refreshed, widths[5]);
+    defer std.heap.page_allocator.free(h5);
 
     if (use_color) try out.writeAll(ansi.dim);
     try out.writeAll("  ");
@@ -96,6 +229,8 @@ fn printAccountsTable(reg: *registry.Registry) !void {
     try writePadded(out, h3, widths[3]);
     try out.writeAll("  ");
     try writePadded(out, h4, widths[4]);
+    try out.writeAll("  ");
+    try writePadded(out, h5, widths[5]);
     try out.writeAll("\n");
     if (use_color) try out.writeAll(ansi.dim);
     try writeRepeat(out, '-', listTotalWidth(&widths, prefix_len, sep_len));
@@ -108,12 +243,13 @@ fn printAccountsTable(reg: *registry.Registry) !void {
             const plan = planDisplay(&rec, "-");
             const rate_5h = resolveRateWindow(rec.last_usage, 300, true);
             const rate_week = resolveRateWindow(rec.last_usage, 10080, false);
-            const rate_5h_str = try formatRateLimitUiAlloc(rate_5h, widths[2]);
+            const rate_5h_str = try formatUsageUiAlloc(options.usage_view, rate_5h, widths[2]);
             defer std.heap.page_allocator.free(rate_5h_str);
-            const rate_week_str = try formatRateLimitUiAlloc(rate_week, widths[3]);
+            const rate_week_str = try formatUsageUiAlloc(options.usage_view, rate_week, widths[3]);
             defer std.heap.page_allocator.free(rate_week_str);
-            const last = try timefmt.formatRelativeTimeOrDashAlloc(std.heap.page_allocator, rec.last_usage_at, now);
-            defer std.heap.page_allocator.free(last);
+            const source = sourceLabel(&rec);
+            const refreshed = try timefmt.formatRelativeTimeOrDashAlloc(std.heap.page_allocator, rec.last_usage_at, now);
+            defer std.heap.page_allocator.free(refreshed);
             const indent: usize = @as(usize, row.depth) * 2;
             const indent_to_print: usize = @min(indent, widths[0]);
             const account_cell = try truncateAlloc(row.account_cell, widths[0] - indent_to_print);
@@ -124,8 +260,10 @@ fn printAccountsTable(reg: *registry.Registry) !void {
             defer std.heap.page_allocator.free(rate_5h_cell);
             const rate_week_cell = try truncateAlloc(rate_week_str, widths[3]);
             defer std.heap.page_allocator.free(rate_week_cell);
-            const last_cell = try truncateAlloc(last, widths[4]);
-            defer std.heap.page_allocator.free(last_cell);
+            const source_cell = try truncateAlloc(source, widths[4]);
+            defer std.heap.page_allocator.free(source_cell);
+            const refreshed_cell = try truncateAlloc(refreshed, widths[5]);
+            defer std.heap.page_allocator.free(refreshed_cell);
             if (use_color) {
                 if (row.is_active) {
                     try out.writeAll(ansi.green);
@@ -143,7 +281,9 @@ fn printAccountsTable(reg: *registry.Registry) !void {
             try out.writeAll("  ");
             try writePadded(out, rate_week_cell, widths[3]);
             try out.writeAll("  ");
-            try writePadded(out, last_cell, widths[4]);
+            try writePadded(out, source_cell, widths[4]);
+            try out.writeAll("  ");
+            try writePadded(out, refreshed_cell, widths[5]);
             try out.writeAll("\n");
             if (use_color) try out.writeAll(ansi.reset);
         } else {
@@ -251,67 +391,17 @@ fn resetPartsAlloc(reset_at: i64, now: i64) !ResetParts {
     };
 }
 
-fn formatRateLimitFullAlloc(window: ?registry.RateLimitWindow) ![]u8 {
-    if (window == null) return try std.fmt.allocPrint(std.heap.page_allocator, "-", .{});
-    if (window.?.resets_at == null) return try std.fmt.allocPrint(std.heap.page_allocator, "-", .{});
-    const now = std.time.timestamp();
-    const reset_at = window.?.resets_at.?;
-    if (now >= reset_at) {
-        return try std.fmt.allocPrint(std.heap.page_allocator, "100%", .{});
-    }
-    const remaining = remainingPercent(window.?.used_percent);
-    var parts = try resetPartsAlloc(reset_at, now);
-    defer parts.deinit();
-    if (parts.same_day) {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s})", .{ remaining, parts.time });
-    }
-    return std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s} on {s})", .{ remaining, parts.time, parts.date });
-}
-
-fn formatRateLimitUiAlloc(window: ?registry.RateLimitWindow, width: usize) ![]u8 {
-    if (window == null) return try std.fmt.allocPrint(std.heap.page_allocator, "-", .{});
-    if (window.?.resets_at == null) return try std.fmt.allocPrint(std.heap.page_allocator, "-", .{});
-    const now = std.time.timestamp();
-    const reset_at = window.?.resets_at.?;
-    if (now >= reset_at) {
-        return try std.fmt.allocPrint(std.heap.page_allocator, "100%", .{});
-    }
-    const remaining = remainingPercent(window.?.used_percent);
-    var parts = try resetPartsAlloc(reset_at, now);
-    defer parts.deinit();
-
-    const candidates_same = [_][]const u8{
-        try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s})", .{ remaining, parts.time }),
-        try std.fmt.allocPrint(std.heap.page_allocator, "{d}%", .{remaining}),
-    };
-    defer std.heap.page_allocator.free(candidates_same[0]);
-    defer std.heap.page_allocator.free(candidates_same[1]);
-
-    if (parts.same_day) {
-        if (width >= candidates_same[0].len or width == 0) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidates_same[0]});
-        return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidates_same[1]});
-    }
-
-    const candidate_full = try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s} on {s})", .{ remaining, parts.time, parts.date });
-    defer std.heap.page_allocator.free(candidate_full);
-    const candidate_date = try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s})", .{ remaining, parts.date });
-    defer std.heap.page_allocator.free(candidate_date);
-    const candidate_time = try std.fmt.allocPrint(std.heap.page_allocator, "{d}% ({s})", .{ remaining, parts.time });
-    defer std.heap.page_allocator.free(candidate_time);
-    const candidate_percent = try std.fmt.allocPrint(std.heap.page_allocator, "{d}%", .{remaining});
-    defer std.heap.page_allocator.free(candidate_percent);
-
-    if (width >= candidate_full.len or width == 0) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidate_full});
-    if (width >= candidate_date.len) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidate_date});
-    if (width >= candidate_time.len) return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidate_time});
-    return std.fmt.allocPrint(std.heap.page_allocator, "{s}", .{candidate_percent});
-}
-
 fn remainingPercent(used: f64) i64 {
     const remaining = 100.0 - used;
     if (remaining <= 0.0) return 0;
     if (remaining >= 100.0) return 100;
     return @as(i64, @intFromFloat(remaining));
+}
+
+fn usedPercent(used: f64) i64 {
+    if (used <= 0.0) return 0;
+    if (used >= 100.0) return 100;
+    return @as(i64, @intFromFloat(used));
 }
 
 fn formatResetTimeAlloc(ts: i64, now: i64) ![]u8 {
@@ -417,14 +507,14 @@ fn writeRepeat(out: *std.Io.Writer, ch: u8, count: usize) !void {
     }
 }
 
-fn listTotalWidth(widths: *const [5]usize, prefix_len: usize, sep_len: usize) usize {
+fn listTotalWidth(widths: []const usize, prefix_len: usize, sep_len: usize) usize {
     var sum: usize = prefix_len;
     for (widths) |w| sum += w;
     sum += sep_len * (widths.len - 1);
     return sum;
 }
 
-fn adjustListWidths(widths: *[5]usize, prefix_len: usize, sep_len: usize) void {
+fn adjustListWidths(widths: []usize, prefix_len: usize, sep_len: usize) void {
     const term_cols = terminalWidth();
     if (term_cols == 0) return;
     const total = listTotalWidth(widths, prefix_len, sep_len);
@@ -433,7 +523,8 @@ fn adjustListWidths(widths: *[5]usize, prefix_len: usize, sep_len: usize) void {
     const min_email: usize = 10;
     const min_plan: usize = 4;
     const min_rate: usize = 1;
-    const min_last: usize = 4;
+    const min_source: usize = 3;
+    const min_refreshed: usize = 3;
 
     var over = total - term_cols;
     if (over == 0) return;
@@ -470,10 +561,18 @@ fn adjustListWidths(widths: *[5]usize, prefix_len: usize, sep_len: usize) void {
     }
     if (over == 0) return;
 
-    if (widths[4] > min_last) {
-        const reducible = widths[4] - min_last;
+    if (widths.len > 4 and widths[4] > min_source) {
+        const reducible = widths[4] - min_source;
         const reduce = @min(reducible, over);
         widths[4] -= reduce;
+        over -= reduce;
+    }
+    if (over == 0) return;
+
+    if (widths.len > 5 and widths[5] > min_refreshed) {
+        const reducible = widths[5] - min_refreshed;
+        const reduce = @min(reducible, over);
+        widths[5] -= reduce;
         over -= reduce;
     }
 }
@@ -588,7 +687,7 @@ test "truncateAlloc respects max_len" {
     try std.testing.expect(out2.len == 1);
 }
 
-test "formatRateLimitFullAlloc shows 100% after reset instead of dash-prefixed value" {
+test "formatUsageFullAlloc shows 100% left after reset" {
     const now = std.time.timestamp();
     const window = registry.RateLimitWindow{
         .used_percent = 100.0,
@@ -596,7 +695,7 @@ test "formatRateLimitFullAlloc shows 100% after reset instead of dash-prefixed v
         .resets_at = now - 60,
     };
 
-    const formatted = try formatRateLimitFullAlloc(window);
+    const formatted = try formatUsageFullAlloc(.left, window);
     defer std.heap.page_allocator.free(formatted);
 
     try std.testing.expectEqualStrings("100%", formatted);

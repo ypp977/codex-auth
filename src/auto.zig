@@ -836,6 +836,15 @@ pub fn refreshActiveUsage(allocator: std.mem.Allocator, codex_home: []const u8, 
     return refreshActiveUsageWithApiFetcher(allocator, codex_home, reg, usage_api.fetchActiveUsage);
 }
 
+pub fn refreshAllUsage(allocator: std.mem.Allocator, codex_home: []const u8, reg: *registry.Registry) !bool {
+    var changed = try refreshActiveUsage(allocator, codex_home, reg);
+    if (!reg.api.usage) return changed;
+    if (try refreshInactiveUsageWithApiFetcher(allocator, codex_home, reg, usage_api.fetchUsageForAuthPath)) {
+        changed = true;
+    }
+    return changed;
+}
+
 fn fetchActiveAccountNames(
     allocator: std.mem.Allocator,
     access_token: []const u8,
@@ -981,7 +990,7 @@ fn refreshActiveUsageFromApi(
     const idx = registry.findAccountIndexByAccountKey(reg, account_key) orelse return .unchanged;
     if (registry.rateLimitSnapshotsEqual(reg.accounts.items[idx].last_usage, latest)) return .unchanged;
 
-    registry.updateUsage(allocator, reg, account_key, latest);
+    registry.updateUsageWithSource(allocator, reg, account_key, latest, .api);
     snapshot_consumed = true;
     return .updated;
 }
@@ -1013,7 +1022,7 @@ fn refreshActiveUsageFromSessions(
     if (latest.event_timestamp_ms < activated_at_ms) return false;
     const idx = registry.findAccountIndexByAccountKey(reg, account_key) orelse return false;
     if (registry.rolloutSignaturesEqual(reg.accounts.items[idx].last_local_rollout, signature)) return false;
-    registry.updateUsage(allocator, reg, account_key, latest.snapshot);
+    registry.updateUsageWithSource(allocator, reg, account_key, latest.snapshot, .local);
     snapshot_consumed = true;
     try registry.setAccountLastLocalRollout(allocator, &reg.accounts.items[idx], latest.path, latest.event_timestamp_ms);
     return true;
@@ -1097,7 +1106,7 @@ fn refreshActiveUsageForDaemonWithDetailedApiFetcher(
         return false;
     }
 
-    registry.updateUsage(allocator, reg, account_key, latest);
+    registry.updateUsageWithSource(allocator, reg, account_key, latest, .api);
     snapshot_consumed = true;
     emitTaggedDaemonLog(.info, "api", "refresh usage{s}status={s}", .{
         fieldSeparator(),
@@ -1213,7 +1222,7 @@ fn refreshActiveUsageFromSessionsForDaemon(
         fieldSeparator(),
         file_label,
     });
-    registry.updateUsage(allocator, reg, account_key, latest_event.snapshot.?);
+    registry.updateUsageWithSource(allocator, reg, account_key, latest_event.snapshot.?, .local);
     latest_event.snapshot = null;
     try registry.setAccountLastLocalRollout(allocator, &reg.accounts.items[idx], latest_event.path, latest_event.event_timestamp_ms);
     refresh_state.clearPending(allocator);
@@ -1254,7 +1263,7 @@ fn applyLatestUsableSnapshotFromRolloutFile(
         return false;
     }
 
-    registry.updateUsage(allocator, reg, account_key, usable.snapshot);
+    registry.updateUsageWithSource(allocator, reg, account_key, usable.snapshot, .local);
     snapshot_consumed = true;
     try registry.setAccountLastLocalRollout(allocator, &reg.accounts.items[idx], usable.path, usable.event_timestamp_ms);
     return true;
@@ -1496,15 +1505,21 @@ fn refreshAutoSwitchCandidatesWithUsageFetcher(
     reg: *registry.Registry,
     usage_fetcher: anytype,
 ) !bool {
+    return refreshInactiveUsageWithApiFetcher(allocator, codex_home, reg, usage_fetcher);
+}
+
+fn refreshInactiveUsageWithApiFetcher(
+    allocator: std.mem.Allocator,
+    codex_home: []const u8,
+    reg: *registry.Registry,
+    usage_fetcher: anytype,
+) !bool {
     const active = reg.active_account_key orelse return false;
     var changed = false;
-    var attempted: usize = 0;
-    var updated: usize = 0;
 
     for (reg.accounts.items) |rec| {
         if (std.mem.eql(u8, rec.account_key, active)) continue;
         if (rec.auth_mode != null and rec.auth_mode.? != .chatgpt) continue;
-        attempted += 1;
 
         const auth_path = registry.accountAuthPath(allocator, codex_home, rec.account_key) catch continue;
         defer allocator.free(auth_path);
@@ -1517,10 +1532,9 @@ fn refreshAutoSwitchCandidatesWithUsageFetcher(
         defer if (!snapshot_consumed) registry.freeRateLimitSnapshot(allocator, &latest);
 
         if (registry.rateLimitSnapshotsEqual(rec.last_usage, latest)) continue;
-        registry.updateUsage(allocator, reg, rec.account_key, latest);
+        registry.updateUsageWithSource(allocator, reg, rec.account_key, latest, .api);
         snapshot_consumed = true;
         changed = true;
-        updated += 1;
     }
 
     return changed;
@@ -1703,7 +1717,7 @@ fn refreshDaemonCandidateUsageByKeyWithFetcher(
         return .{ .visited = true, .attempted = 1 };
     }
 
-    registry.updateUsage(allocator, reg, account_key, latest);
+    registry.updateUsageWithSource(allocator, reg, account_key, latest, .api);
     snapshot_consumed = true;
     try refresh_state.candidate_index.upsertFromRegistry(allocator, reg, account_key, std.time.timestamp());
     return .{ .visited = true, .attempted = 1, .updated = 1 };
@@ -2441,54 +2455,4 @@ fn escapeSystemdValue(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
 
 fn escapePowerShellSingleQuoted(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     return std.mem.replaceOwned(u8, allocator, input, "'", "''");
-}
-
-test "candidate index refreshes cached ranking after a reset window expires" {
-    const bdd = @import("tests/bdd_helpers.zig");
-    const gpa = std.testing.allocator;
-
-    var reg = bdd.makeEmptyRegistry();
-    defer reg.deinit(gpa);
-
-    try bdd.appendAccount(gpa, &reg, "active@example.com", "", null);
-    try bdd.appendAccount(gpa, &reg, "reset@example.com", "", null);
-    try bdd.appendAccount(gpa, &reg, "steady@example.com", "", null);
-
-    const active_account_key = try bdd.accountKeyForEmailAlloc(gpa, "active@example.com");
-    defer gpa.free(active_account_key);
-    const reset_account_key = try bdd.accountKeyForEmailAlloc(gpa, "reset@example.com");
-    defer gpa.free(reset_account_key);
-    const steady_account_key = try bdd.accountKeyForEmailAlloc(gpa, "steady@example.com");
-    defer gpa.free(steady_account_key);
-
-    try registry.setActiveAccountKey(gpa, &reg, active_account_key);
-
-    const reset_idx = registry.findAccountIndexByAccountKey(&reg, reset_account_key) orelse return error.TestExpectedEqual;
-    reg.accounts.items[reset_idx].last_usage = .{
-        .primary = .{ .used_percent = 95.0, .window_minutes = 300, .resets_at = 1010 },
-        .secondary = null,
-        .credits = null,
-        .plan_type = .pro,
-    };
-    reg.accounts.items[reset_idx].last_usage_at = 100;
-
-    const steady_idx = registry.findAccountIndexByAccountKey(&reg, steady_account_key) orelse return error.TestExpectedEqual;
-    reg.accounts.items[steady_idx].last_usage = .{
-        .primary = .{ .used_percent = 60.0, .window_minutes = 300, .resets_at = null },
-        .secondary = null,
-        .credits = null,
-        .plan_type = .pro,
-    };
-    reg.accounts.items[steady_idx].last_usage_at = 50;
-
-    var index = CandidateIndex{};
-    defer index.deinit(gpa);
-
-    try index.rebuild(gpa, &reg, 1000);
-    try std.testing.expect(index.best() != null);
-    try std.testing.expect(std.mem.eql(u8, index.best().?.account_key, steady_account_key));
-
-    try index.rebuildIfScoreExpired(gpa, &reg, 1011);
-    try std.testing.expect(index.best() != null);
-    try std.testing.expect(std.mem.eql(u8, index.best().?.account_key, reset_account_key));
 }

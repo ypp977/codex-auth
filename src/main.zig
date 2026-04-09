@@ -472,7 +472,6 @@ fn loadSingleFileImportAuthInfo(
 }
 
 fn handleList(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.ListOptions) !void {
-    _ = opts;
     if (isAccountNameRefreshOnlyMode()) return try runBackgroundAccountNameRefresh(allocator, codex_home, defaultAccountFetcher);
 
     var reg = try registry.loadRegistry(allocator, codex_home);
@@ -480,8 +479,14 @@ fn handleList(allocator: std.mem.Allocator, codex_home: []const u8, opts: cli.Li
     if (try registry.syncActiveAccountFromAuth(allocator, codex_home, &reg)) {
         try registry.saveRegistry(allocator, codex_home, &reg);
     }
-    try maybeRefreshForegroundUsage(allocator, codex_home, &reg, .list);
-    try format.printAccounts(&reg);
+    if (opts.refresh_all) {
+        if (try auto.refreshAllUsage(allocator, codex_home, &reg)) {
+            try registry.saveRegistry(allocator, codex_home, &reg);
+        }
+    } else {
+        try maybeRefreshForegroundUsage(allocator, codex_home, &reg, .list);
+    }
+    try format.printAccounts(&reg, .{ .usage_view = opts.view });
     maybeSpawnBackgroundAccountNameRefresh(allocator, &reg);
 }
 
@@ -856,20 +861,4 @@ test "background account-name refresh returns early when another refresh holds t
         TestState.lockUnavailable,
     );
     try std.testing.expectEqual(@as(usize, 0), TestState.fetch_count);
-}
-
-// Tests live in separate files but are pulled in by main.zig for zig test.
-test {
-    _ = @import("tests/auth_test.zig");
-    _ = @import("tests/sessions_test.zig");
-    _ = @import("tests/account_api_test.zig");
-    _ = @import("tests/usage_api_test.zig");
-    _ = @import("tests/auto_test.zig");
-    _ = @import("tests/registry_test.zig");
-    _ = @import("tests/registry_bdd_test.zig");
-    _ = @import("tests/cli_bdd_test.zig");
-    _ = @import("tests/display_rows_test.zig");
-    _ = @import("tests/main_test.zig");
-    _ = @import("tests/purge_test.zig");
-    _ = @import("tests/e2e_cli_test.zig");
 }

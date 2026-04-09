@@ -92,7 +92,7 @@ Remove-Item "$env:LOCALAPPDATA\codex-auth\bin\codex-auth-auto.exe" -Force -Error
 
 | Command | Description |
 |---------|-------------|
-| `codex-auth list` | List all accounts |
+| `codex-auth list [--refresh-all] [--view <left\\|used\\|raw>]` | List all accounts with selectable quota views and optional full refresh |
 | `codex-auth login [--device-auth]` | Run `codex login` (optionally with `--device-auth`), then add the current account |
 | `codex-auth switch [<email>]` | Switch active account interactively or by partial match |
 | `codex-auth remove` | Remove accounts with interactive multi-select |
@@ -123,6 +123,25 @@ Remove-Item "$env:LOCALAPPDATA\codex-auth\bin\codex-auth-auto.exe" -Force -Error
 ```shell
 codex-auth list
 ```
+
+Refresh all account usage through the API before listing:
+
+```shell
+codex-auth list --refresh-all
+```
+
+Switch quota views:
+
+```shell
+codex-auth list --view left
+codex-auth list --view used
+codex-auth list --view raw
+```
+
+`list` now also shows:
+
+- `SOURCE`: whether the latest quota snapshot came from `api` or `local`
+- `REFRESHED`: when that quota snapshot was last updated
 
 ### Switch Account
 
